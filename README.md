@@ -6,6 +6,8 @@
 - https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/API
 - https://novelai.net/image
 
+![emb](./doc/image/image.png)
+
 ## SETUP
 - 在comfyui根目录下创建.env文件, 编写 NOVELAI_TOKEN 以调用NOVELAI
 - create .env file in the root directory of comfyui, write NOVELAI_TOKEN to call NOVELAI
