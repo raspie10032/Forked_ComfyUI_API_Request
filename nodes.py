@@ -226,7 +226,11 @@ class NovelAIRequest:
 
     def novelai_generate_image(self, payload, token, proxy):
 
-        save_path = "./temp"
+        save_path = "./temp/api_request"
+
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
         token = token if token else os.getenv("NOVELAI_TOKEN", "")
         header = {
             "authorization": "Bearer " + token,
