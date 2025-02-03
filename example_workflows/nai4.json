@@ -15,14 +15,8 @@
   },
   "39": {
     "inputs": {
-      "prompt": [
-        "42",
-        0
-      ],
-      "negative_prompt": [
-        "41",
-        0
-      ],
+      "prompt": "prompt here",
+      "negative_prompt": "negative prompt here",
       "seed": 198,
       "sampler": "k_euler_ancestral",
       "n_iter": 1,
@@ -39,24 +33,6 @@
     "class_type": "NovelAI_Request_Payload",
     "_meta": {
       "title": "NovelAIRequestPayload"
-    }
-  },
-  "41": {
-    "inputs": {
-      "Text": ""
-    },
-    "class_type": "DF_Text",
-    "_meta": {
-      "title": "Text"
-    }
-  },
-  "42": {
-    "inputs": {
-      "Text": "{prompt},rating:general, amazing quality, very aesthetic, absurdres,"
-    },
-    "class_type": "DF_Text",
-    "_meta": {
-      "title": "Text"
     }
   },
   "44": {
