@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI_API_Request"
 description = "Comfyui SD-API API/NOVEL AI request node, support nai3/nai4"
-version = "1.0.1"
+version = "1.0.2"
 license = {file = "LICENSE"}
 dependencies = ["python-dotenv"]
 
@@ -11,5 +11,5 @@ Repository = "https://github.com/DiaoDaiaChan/ComfyUI_API_Request"
 
 [tool.comfy]
 PublisherId = "diaodaiachan"
-DisplayName = "ComfyUI_API_Request"
+DisplayName = "ComfyUI_NovelAI_API_Request"
 Icon = ""
