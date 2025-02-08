@@ -1,0 +1,15 @@
+[project]
+name = "api_request"
+description = "Comfyui SD-API API/NOVEL AI request node, support nai3/nai4"
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["python-dotenv"]
+
+[project.urls]
+Repository = "https://github.com/DiaoDaiaChan/ComfyUI_API_Request"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI_API_Request"
+Icon = ""
