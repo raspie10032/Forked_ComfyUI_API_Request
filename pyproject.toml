@@ -1,7 +1,7 @@
 [project]
-name = "api_request"
+name = "ComfyUI_API_Request"
 description = "Comfyui SD-API API/NOVEL AI request node, support nai3/nai4"
-version = "1.0.0"
+version = "1.0.1"
 license = {file = "LICENSE"}
 dependencies = ["python-dotenv"]
 
