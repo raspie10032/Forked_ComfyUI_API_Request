@@ -10,6 +10,6 @@ Repository = "https://github.com/DiaoDaiaChan/ComfyUI_API_Request"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "diaodaiachan"
 DisplayName = "ComfyUI_API_Request"
 Icon = ""
