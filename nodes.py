@@ -360,6 +360,7 @@ class NovelAIRequestPayload:
         scheduler_list = ["karras"]
 
         model_list = [
+            "nai-diffusion-4-full",
             "nai-diffusion-4-curated-preview",
             "nai-diffusion-3",
             "nai-diffusion-furry-3",
