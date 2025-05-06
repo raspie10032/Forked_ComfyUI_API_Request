@@ -1,27 +1,21 @@
-# Comfyui SD-API/NOVELAI API请求节点/request node
+# Major Changes
 
-## support SD-WEBUI API and NOVELAI (support nai-diffusion-3 and nai-diffusion-4)/支持请求SD-WEBUI API以及 NOVELAI(支持nai-diffusion-3和nai-diffusion-4)
+## Feature Updates
 
+1.  Use the NAI token call name as the call name for the following custom node:
+    [https://github.com/bedovyy/ComfyUI_NAIDGenerator](https://github.com/bedovyy/ComfyUI_NAIDGenerator)
+2.  Added support for the NAI Diffusion V4.5 Curated model.
 
-- https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/API
-- https://novelai.net/image
+## Feature Removals
 
-![emb](./doc/image/image.png)
+1.  Removed SDWebUI API functionality.
+2.  Removed compressed files for archiving previous builds.
+3.  Removed example workflows and preview images.
 
-## SETUP
-- 在comfyui根目录下创建.env文件, 编写 NOVELAI_TOKEN 以调用NOVELAI
-- create .env file in the root directory of comfyui, write NOVELAI_TOKEN to call NOVELAI
+## Bug Fixes
 
-```dotenv
-NOVELAI_TOKEN=ey....
-```
+1.  Fixed an issue where the character position specification function did not work.
 
-## Get Token
-- 打开控制台, 输入以下命令
-- Open console, type
+---
 
-```js
-console.log(JSON.parse(localStorage.session).auth_token);
-```
-
-
+**Note:** This custom node was forked solely for personal use.

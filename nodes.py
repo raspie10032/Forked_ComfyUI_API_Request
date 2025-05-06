@@ -2,8 +2,6 @@ import os
 import zipfile
 import aiohttp
 import asyncio
-
-import requests
 import json
 import base64
 import torch
@@ -88,7 +86,9 @@ class NovelAITXT2IMGPayload(BaseRequest):
     def __init__(
             self, ucPreset: int,
             cfg_rescale: int, characterPrompts: list[CharacterPrompt]|list,
-            prefer_brownian: bool, base_request: BaseRequest, model
+            prefer_brownian: bool, base_request: BaseRequest, model,
+            use_coords: bool = True,  # 추가된 매개변수
+            use_order: bool = True    # 추가된 매개변수
     ):
         super().__init__(**vars(base_request))
 
@@ -100,6 +100,9 @@ class NovelAITXT2IMGPayload(BaseRequest):
         self.noise_schedule = base_request.scheduler
         self.characterPrompts = characterPrompts
         self.model = model
+        self.use_coords = use_coords  # 추가된 속성
+        self.use_order = use_order    # 추가된 속성
+        
         characterPrompts_list = []
 
         for cp in self.characterPrompts:
@@ -116,7 +119,9 @@ class NovelAITXT2IMGPayload(BaseRequest):
             "caption": {
                 "base_caption": self.prompt,
                 "char_captions": char_captions
-            }
+            },
+            "use_coords": self.use_coords,  # 여기에 추가
+            "use_order": self.use_order     # 여기에 추가
         }
         char_captions = []
         for cp in self.characterPrompts:
@@ -125,63 +130,11 @@ class NovelAITXT2IMGPayload(BaseRequest):
             "caption": {
                 "base_caption": self.negative_prompt,
                 "char_captions": char_captions
-            }
+            },
+            "use_coords": False,  # 부정 프롬프트에는 좌표 사용 안함
+            "use_order": False    # 부정 프롬프트에는 순서 사용 안함
         }
         self.prefer_brownian = prefer_brownian
-
-
-class TXT2IMGRequestExtend(BaseRequest):
-
-    def __init__(self, script_name: str = "",
-                 restore_faces: bool = False, tiling: bool = False, subseed: int = -1, subseed_strength: float = 0,
-                 styles: List[str] = [], sampler_index: str = "Euler a", script_args: List[Any] = [],
-                 alwayson_scripts: Dict[str, Any] = {}, hr_scale: float = 2, hr_upscaler: str = "",
-                 hr_second_pass_steps: int = 10, hr_resize_x: int = 0, hr_resize_y: int = 0,
-                 hr_checkpoint_name: str = "", hr_sampler_name: str = "", hr_prompt: str = "",
-                 hr_negative_prompt: str = "", s_min_uncond: float = 0, s_churn: float = 0, s_tmax: float = 0,
-                 s_tmin: float = 0, s_noise: float = 0, refiner_checkpoint: str = "",
-                 refiner_switch_at: int = 0, disable_extra_networks: bool = False, comments: Dict[str, Any] = {},
-                 enable_hr: bool = False, firstphase_width: int = 0, firstphase_height: int = 0,
-                 do_not_save_samples: bool = False, do_not_save_grid: bool = False, eta: float = 0,
-                 seed_resize_from_h: int = -1, seed_resize_from_w: int = -1):
-
-        super().__init__()
-
-        self.script_name = script_name
-        self.restore_faces = restore_faces
-        self.tiling = tiling
-        self.subseed = subseed
-        self.subseed_strength = subseed_strength
-        self.styles = styles
-        self.sampler_index = sampler_index
-        self.script_args = script_args
-        self.alwayson_scripts = alwayson_scripts
-        self.hr_scale = hr_scale
-        self.hr_upscaler = hr_upscaler
-        self.hr_second_pass_steps = hr_second_pass_steps
-        self.hr_resize_x = hr_resize_x
-        self.hr_resize_y = hr_resize_y
-        self.hr_checkpoint_name = hr_checkpoint_name
-        self.hr_sampler_name = hr_sampler_name
-        self.hr_prompt = hr_prompt
-        self.hr_negative_prompt = hr_negative_prompt
-        self.s_min_uncond = s_min_uncond
-        self.s_churn = s_churn
-        self.s_tmax = s_tmax
-        self.s_tmin = s_tmin
-        self.s_noise = s_noise
-        self.refiner_checkpoint = refiner_checkpoint
-        self.refiner_switch_at = refiner_switch_at
-        self.disable_extra_networks = disable_extra_networks
-        self.comments = comments
-        self.enable_hr = enable_hr
-        self.firstphase_width = firstphase_width
-        self.firstphase_height = firstphase_height
-        self.do_not_save_samples = do_not_save_samples
-        self.do_not_save_grid = do_not_save_grid
-        self.eta = eta
-        self.seed_resize_from_h = seed_resize_from_h
-        self.seed_resize_from_w = seed_resize_from_w
 
 
 def tensor_to_pil(img_tensor, batch_index=0):
@@ -222,7 +175,7 @@ class NovelAIRequest:
     RETURN_NAMES = ("image",)
     FUNCTION = "novelai_generate_image"
     OUTPUT_NODE = True
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
+    CATEGORY = "NovelAI"  # 카테고리 변경
 
     def novelai_generate_image(self, payload, token, proxy):
 
@@ -231,7 +184,8 @@ class NovelAIRequest:
         if not os.path.exists(save_path):
             os.makedirs(save_path)
 
-        token = token if token else os.getenv("NOVELAI_TOKEN", "")
+        # NOVELAI_TOKEN에서 NAI_ACCESS_TOKEN으로 환경 변수 이름 변경
+        token = token if token else os.getenv("NAI_ACCESS_TOKEN", "")
         header = {
             "authorization": "Bearer " + token,
             ":authority": "https://api.novelai.net",
@@ -318,7 +272,7 @@ class CharacterPromptSelect:
     RETURN_NAMES = ("CharacterPrompt",)
     FUNCTION = "build_character_prompt"
     OUTPUT_NODE = False
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
+    CATEGORY = "NovelAI/Character"  # 카테고리 변경 및 세분화
 
     def build_character_prompt(
         self, character1, character1_uc, character1_x, character1_y,
@@ -359,13 +313,28 @@ class NovelAIRequestPayload:
         ]
         scheduler_list = ["karras"]
 
-        model_list = [
+        # 표시할 모델 이름 리스트 (이 이름이 UI에 표시됨)
+        model_display_list = [
+            "NAI Diffusion V4.5 Curated",
+            "NAI Diffusion V4 Full",
+            "NAI Diffusion V4 Curated Preview",
+            "NAI Diffusion V3",
+            "NAI Diffusion Furry V3",
+            "NAI Diffusion V2"
+        ]
+
+        # 각 표시 이름에 대응하는 실제 API 모델 ID
+        model_ids = [
+            "nai-diffusion-4-5-curated",
             "nai-diffusion-4-full",
             "nai-diffusion-4-curated-preview",
             "nai-diffusion-3",
             "nai-diffusion-furry-3",
             "nai-diffusion-2",
         ]
+
+        # 표시 이름과 API ID를 딕셔너리로 매핑
+        model_name_to_id = dict(zip(model_display_list, model_ids))
 
         return {
             "required": {
@@ -380,22 +349,21 @@ class NovelAIRequestPayload:
                 "cfg_scale": ("FLOAT", {"default": 6}),
                 "width": ("INT", {"default": 832}),
                 "height": ("INT", {"default": 1216}),
-
                 "scheduler": (scheduler_list,),
                 "ucPreset": (ucPreset_list,),
                 "cfg_rescale": ("INT", {"default": 0}),
                 "characterPrompts": ("LIST",),
                 "prefer_brownian": ("BOOLEAN", {"default": False}),
-                "model": (model_list, )
+                "use_coords": ("BOOLEAN", {"default": True}),
+                "use_order": ("BOOLEAN", {"default": True}),
+                "model": (model_display_list, {"default": model_display_list[0]})  # 표시 이름 사용
             }
         }
 
     RETURN_TYPES = ("NovelAITXT2IMGPayload", "DICT")
     RETURN_NAMES = ("payload", "payload_dict")
     FUNCTION = "build_payload"
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
-    # INPUT_IS_LIST = False
-    # OUTPUT_IS_LIST = (False,)
+    CATEGORY = "NovelAI/Payload"  # 카테고리 변경 및 세분화
 
     def build_payload(
             self,
@@ -412,9 +380,22 @@ class NovelAIRequestPayload:
             ucPreset,
             cfg_rescale,
             prefer_brownian,
-            model,
+            model,  # 이제 이 값은 표시 이름
+            use_coords=True,
+            use_order=True,
             characterPrompts=[],
     ):
+        # 표시 이름에서 API 모델 ID로 변환
+        model_ids = {
+            "NAI Diffusion V4.5 Curated": "nai-diffusion-4-5-curated",
+            "NAI Diffusion V4 Full": "nai-diffusion-4-full",
+            "NAI Diffusion V4 Curated Preview": "nai-diffusion-4-curated-preview",
+            "NAI Diffusion V3": "nai-diffusion-3",
+            "NAI Diffusion Furry V3": "nai-diffusion-furry-3",
+            "NAI Diffusion V2": "nai-diffusion-2"
+        }
+        model_id = model_ids.get(model, "nai-diffusion-4-5-curated")  # 기본값 설정
+
         negative_prompt = negative_prompt + "," + ucPreset
         instance_ = BaseRequest(
             prompt=prompt,
@@ -431,238 +412,21 @@ class NovelAIRequestPayload:
 
         ucPreset = ucPreset_list.index(ucPreset)
 
-        instance_ = NovelAITXT2IMGPayload(ucPreset,cfg_rescale,characterPrompts,prefer_brownian, instance_, model)
-
-        return instance_, dict(vars(instance_))
-
-
-class SDWebUIRequest:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "payload": ("BaseRequest",),
-                "backend_url": ("STRING", {"default": "http://127.0.0.1:7860"}),
-            },
-            "optional": {
-                "payload_extend": ("TXT2IMGRequestExtend",)
-            },
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
-    FUNCTION = "sdweb_generate_image"
-    OUTPUT_NODE = True
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
-
-    def sdweb_generate_image(self, payload, backend_url):
-        response = requests.post(backend_url + "/sdapi/v1/txt2img", json=dict(vars(payload)))
-        resp = response.json()
-        b64_images = resp["images"]
-
-        def b64_to_pil_and_tensor(b64_image: str):
-            img_data = base64.b64decode(b64_image)
-            img = Image.open(BytesIO(img_data))
-            tensor_img = pil_to_tensor(img)
-
-            return tensor_img
-
-        tensor_images = [b64_to_pil_and_tensor(b64_image) for b64_image in b64_images]
-
-        tensor = torch.cat(tensor_images, dim=0)
-
-        return (tensor,)
-
-
-class SDWebUIRequestPayload:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        sampler_list = [
-            "DPM++ 2M", "DPM++ SDE", "DPM++ 2M SDE", "DPM++ 2M SDE Heun", "DPM++ 2S a", "DPM++ 3M SDE",
-            "Euler a", "Euler", "LMS", "Heun", "DPM2", "DPM2 a", "DPM fast", "DPM adaptive", "Restart",
-            "HeunPP2", "IPNDM", "IPNDM_V", "DEIS", "DDIM", "DDIM CFG++", "PLMS", "UniPC", "LCM", "DDPM"
-        ]
-        scheduler_list = ["Automatic", "Karras", "Exponential", "SGM Uniform", "Simple", "Normal", "DDIM", "Beta"]
-
-        return {
-            "required": {
-                "prompt": ("STRING", {"default": "prompt here"})
-            },
-            "optional": {
-                "negative_prompt": ("STRING", {"default": "negative prompt here"}),
-                "seed": ("INT", {"default": -1}),
-                "sampler": (sampler_list,),
-                "batch_size": ("INT", {"default": 1}),
-                "n_iter": ("INT", {"default": 1}),
-                "steps": ("INT", {"default": 20}),
-                "cfg_scale": ("FLOAT", {"default": 7}),
-                "width": ("INT", {"default": 512}),
-                "height": ("INT", {"default": 512}),
-                "denoising_strength": ("FLOAT", {"default": 1}),
-                "scheduler": (scheduler_list,),
-                "send_images": ("BOOLEAN", {"default": True}),
-                "save_images": ("BOOLEAN", {"default": True}),
-                "override_settings": ("STRING", {"default": ""}),
-                "override_settings_restore_afterwards": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = ("BaseRequest", "DICT")
-    RETURN_NAMES = ("payload", "payload_dict")
-    FUNCTION = "build_payload"
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
-    # INPUT_IS_LIST = False
-    # OUTPUT_IS_LIST = (False,)
-
-    def build_payload(
-            self,
-            prompt,
-            negative_prompt,
-            seed,
-            sampler,
-            batch_size,
-            n_iter,
-            steps,
-            cfg_scale,
-            width,
-            height,
-            denoising_strength,
-            scheduler,
-            send_images,
-            save_images,
-            override_settings,
-            override_settings_restore_afterwards
-    ):
-        instance_ = BaseRequest(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            seed=seed,
-            sampler_name=sampler,
-            batch_size=batch_size,
-            n_iter=n_iter,
-            steps=steps,
-            cfg_scale=cfg_scale,
-            width=width,
-            height=height,
-            denoising_strength=denoising_strength,
-            scheduler=scheduler,
-            send_images=send_images,
-            save_images=save_images,
-            override_settings=json.loads(override_settings),
-            override_settings_restore_afterwards=override_settings_restore_afterwards
-
-        )
-
-        return instance_, dict(vars(instance_))
-
-
-class SDWebUIRequestPayloadExtend:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "script_name": ("STRING", {"default": ""}),
-                "restore_faces": ("BOOLEAN", {"default": False}),
-                "tiling": ("BOOLEAN", {"default": False}),
-                "subseed": ("INT", {"default": -1}),
-                "subseed_strength": ("FLOAT", {"default": 0}),
-                "styles": ("LIST", {"default": []}),
-                "sampler_index": ("STRING", {"default": ""}),
-                "script_args": ("STRING", {"default": ""}),
-                "alwayson_scripts": ("STRING", {"default": "alwayson_scripts"}),
-                "hr_scale": ("FLOAT", {"default": 2}),
-                "hr_upscaler": ("STRING", {"default": "hr_upscaler"}),
-                "hr_second_pass_steps": ("INT", {"default": 0}),
-                "hr_resize_x": ("INT", {"default": 0}),
-                "hr_resize_y": ("INT", {"default": 0}),
-                "hr_checkpoint_name": ("STRING", {"default": ""}),
-                "hr_sampler_name": ("STRING", {"default": ""}),
-                "hr_prompt": ("STRING", {"default": "hr_prompt"}),
-                "hr_negative_prompt": ("STRING", {"default": ""}),
-                "s_min_uncond": ("FLOAT", {"default": 0}),
-                "s_churn": ("FLOAT", {"default": 0}),
-                "s_tmax": ("FLOAT", {"default": 0}),
-                "s_tmin": ("FLOAT", {"default": 0}),
-                "s_noise": ("FLOAT", {"default": 0}),
-                "refiner_checkpoint": ("STRING", {"default": ""}),
-                "refiner_switch_at": ("INT", {"default": 0}),
-                "disable_extra_networks": ("BOOLEAN", {"default": False}),
-                "comments": ("STRING", {"default": ""}),
-                "enable_hr": ("BOOLEAN", {"default": False}),
-                "firstphase_width": ("INT", {"default": 0}),
-                "firstphase_height": ("INT", {"default": 0}),
-                "do_not_save_samples": ("BOOLEAN", {"default": False}),
-                "do_not_save_grid": ("BOOLEAN", {"default": False}),
-                "eta": ("FLOAT", {"default": 0}),
-                "seed_resize_from_h": ("INT", {"default": 0}),
-                "seed_resize_from_w": ("INT", {"default": 0})
-
-            }
-        }
-
-    RETURN_TYPES = ("TXT2IMGRequestExtend", "DICT")
-    RETURN_NAMES = ("payload", "payload_dict")
-    FUNCTION = "build_payload"
-    CATEGORY = "SDWebUI-API/SDWebUI-API"
-
-    def build_payload(
-        self,
-        script_name: str = "",
-        restore_faces: bool = False,
-        tiling: bool = False,
-        subseed: int = -1,
-        subseed_strength: float = 0,
-        styles: List[str] = [],
-        sampler_index: str = "Euler a",
-        script_args: List[Any] = [],
-        alwayson_scripts: Dict[str, Any] = {},
-        hr_scale: float = 2,
-        hr_upscaler: str = "",
-        hr_second_pass_steps: int = 0,
-        hr_resize_x: int = 0,
-        hr_resize_y: int = 0,
-        hr_checkpoint_name: str = "",
-        hr_sampler_name: str = "",
-        hr_prompt: str = "",
-        hr_negative_prompt: str = "",
-        s_min_uncond: float = 0,
-        s_churn: float = 0,
-        s_tmax: float = 0,
-        s_tmin: float = 0,
-        s_noise: float = 0,
-        refiner_checkpoint: str = "",
-        refiner_switch_at: int = 0,
-        disable_extra_networks: bool = False,
-        comments: str = "",
-        enable_hr: bool = False,
-        firstphase_width: int = 0,
-        firstphase_height: int = 0,
-        do_not_save_samples: bool = False,
-        do_not_save_grid: bool = False,
-        eta: float = 0,
-        seed_resize_from_h: int = 0,
-        seed_resize_from_w: int = 0
-    ):
-        instance_ = TXT2IMGRequestExtend(
-            script_name, restore_faces,
-            tiling, subseed, subseed_strength, styles, sampler_index,
-            script_args, alwayson_scripts, hr_scale, hr_upscaler,
-            hr_second_pass_steps, hr_resize_x, hr_resize_y, hr_checkpoint_name, hr_sampler_name, hr_prompt, hr_negative_prompt,
-             s_min_uncond, s_churn, s_tmax, s_tmin, s_noise,
-             refiner_checkpoint, refiner_switch_at, disable_extra_networks, comments, enable_hr, firstphase_width,
-            firstphase_height, do_not_save_samples, do_not_save_grid, eta, seed_resize_from_h, seed_resize_from_w
+        instance_ = NovelAITXT2IMGPayload(
+            ucPreset,
+            cfg_rescale,
+            characterPrompts,
+            prefer_brownian,
+            instance_,
+            model_id,  # API 모델 ID 사용
+            use_coords,
+            use_order
         )
 
         return instance_, dict(vars(instance_))
 
 
 NODE_CLASS_MAPPINGS = {
-    "SDWebUI_Request": SDWebUIRequest,
-    "SDWebUI_Request_Payload": SDWebUIRequestPayload,
-    "SDWebUI_Request_PayloadExtend": SDWebUIRequestPayloadExtend,
     "NovelAI_Request": NovelAIRequest,
     "Character_Prompt_Select": CharacterPromptSelect,
     "NovelAI_Request_Payload": NovelAIRequestPayload
@@ -670,11 +434,17 @@ NODE_CLASS_MAPPINGS = {
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SDWebUI_Request": "SDWebUIRequest",
-    "SDWebUI_Request_Payload": "SDWebUIRequestPayload",
-    "SDWebUI_Request_PayloadExtend": "SDWebUIRequestPayloadExtend",
     "NovelAI_Request": "NovelAIRequest",
     "Character_Prompt_Select": "CharacterPromptSelect",
     "NovelAI_Request_Payload": "NovelAIRequestPayload"
+}
 
+# 모델 ID와 표시 이름 매핑을 클래스 외부에서도 사용할 수 있도록 정의
+MODEL_DISPLAY_NAMES = {
+    "nai-diffusion-4-5-curated": "NAI Diffusion V4.5 Curated",
+    "nai-diffusion-4-full": "NAI Diffusion V4 Full",
+    "nai-diffusion-4-curated-preview": "NAI Diffusion V4 Curated Preview",
+    "nai-diffusion-3": "NAI Diffusion V3",
+    "nai-diffusion-furry-3": "NAI Diffusion Furry V3",
+    "nai-diffusion-2": "NAI Diffusion V2"
 }
