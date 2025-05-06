@@ -9,7 +9,7 @@
 ## Feature Removals
 
 1.  Removed SDWebUI API functionality.
-2.  Removed compressed files for archiving previous builds.
+2.  Removed Archives for archiving previous builds.
 3.  Removed example workflows and preview images.
 
 ## Bug Fixes
