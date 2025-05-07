@@ -9,6 +9,10 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 from typing import Optional, List, Union, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 ucPreset_list = [
     "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, logo, dated, signature, multiple views, gigantic breasts",
@@ -17,19 +21,33 @@ ucPreset_list = [
 ]
 
 
-async def post_novelai(url, data, header, proxy):
+async def post_novelai(url, data, header):
+    """
+    Send a POST request to the NovelAI API
+    
+    Args:
+        url: API endpoint URL
+        data: Request data (JSON)
+        header: Request headers with auth token
+        
+    Returns:
+        Response data or raises an exception
+    """
     async with aiohttp.ClientSession(headers=header) as session:
         try:
-            async with session.post(url, json=data, proxy=proxy) as response:
+            async with session.post(url, json=data) as response:
                 if response.status == 429:
                     resp = await response.json()
                     message = resp.get("message", "Too many requests, retrying...")
+                    print(f"Rate limit hit: {message}")
                     await asyncio.sleep(5)
-                    return await post_novelai(url, data, header, proxy)
+                    return await post_novelai(url, data, header)
+                elif response.status == 401:
+                    raise ValueError("Invalid NovelAI token. Check your NAI_ACCESS_TOKEN in .env file.")
                 elif response.status == 200:
                     return await response.read()
                 else:
-                    raise Exception(f"Request failed with status {response.status}")
+                    raise Exception(f"Request failed with status {response.status}: {await response.text()}")
         except Exception as e:
             print(f"Error during request: {e}")
             raise e
@@ -53,8 +71,8 @@ class BaseRequest:
             sampler_name: str = "Euler a",
             batch_size: int = 1,
             n_iter: int = 1,
-            steps: int = 28,
-            cfg_scale: float = 7,
+            steps: int = 23,
+            cfg_scale: float = 5,
             width: int = 832,
             height: int = 1216,
             denoising_strength: float = 1,
@@ -84,11 +102,10 @@ class BaseRequest:
 
 class NovelAITXT2IMGPayload(BaseRequest):
     def __init__(
-            self, ucPreset: int,
-            cfg_rescale: int, characterPrompts: list[CharacterPrompt]|list,
+            self, ucPreset: int, cfg_rescale: int, 
+            characterPrompts: list[CharacterPrompt]|list,
             prefer_brownian: bool, base_request: BaseRequest, model,
-            use_coords: bool = True,  # 추가된 매개변수
-            use_order: bool = True    # 추가된 매개변수
+            use_coords: bool = True, use_order: bool = True
     ):
         super().__init__(**vars(base_request))
 
@@ -100,8 +117,8 @@ class NovelAITXT2IMGPayload(BaseRequest):
         self.noise_schedule = base_request.scheduler
         self.characterPrompts = characterPrompts
         self.model = model
-        self.use_coords = use_coords  # 추가된 속성
-        self.use_order = use_order    # 추가된 속성
+        self.use_coords = use_coords
+        self.use_order = use_order
         
         characterPrompts_list = []
 
@@ -120,8 +137,8 @@ class NovelAITXT2IMGPayload(BaseRequest):
                 "base_caption": self.prompt,
                 "char_captions": char_captions
             },
-            "use_coords": self.use_coords,  # 여기에 추가
-            "use_order": self.use_order     # 여기에 추가
+            "use_coords": self.use_coords,
+            "use_order": self.use_order
         }
         char_captions = []
         for cp in self.characterPrompts:
@@ -131,8 +148,8 @@ class NovelAITXT2IMGPayload(BaseRequest):
                 "base_caption": self.negative_prompt,
                 "char_captions": char_captions
             },
-            "use_coords": False,  # 부정 프롬프트에는 좌표 사용 안함
-            "use_order": False    # 부정 프롬프트에는 순서 사용 안함
+            "use_coords": False,
+            "use_order": False
         }
         self.prefer_brownian = prefer_brownian
 
@@ -157,114 +174,38 @@ def pil_to_tensor(image):
     return image
 
 
-class NovelAIRequest:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "payload": ("NovelAITXT2IMGPayload",),
-            },
-            "optional": {
-                "token": ("STRING", {"default": "ey...."}),
-                "proxy": ("STRING", {"default": "http://127.0.0.1:7890"})
-            },
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
-    FUNCTION = "novelai_generate_image"
-    OUTPUT_NODE = True
-    CATEGORY = "NovelAI"  # 카테고리 변경
-
-    def novelai_generate_image(self, payload, token, proxy):
-
-        save_path = "./temp/api_request"
-
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-
-        # NOVELAI_TOKEN에서 NAI_ACCESS_TOKEN으로 환경 변수 이름 변경
-        token = token if token else os.getenv("NAI_ACCESS_TOKEN", "")
-        header = {
-            "authorization": "Bearer " + token,
-            ":authority": "https://api.novelai.net",
-            ":path": "/ai/generate-image",
-            "content-type": "application/json",
-            "referer": "https://novelai.net",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
-        }
-
-        payload = {
-            "input": payload.prompt,
-            "model": payload.model,
-            "parameters": dict(vars(payload))
-
-        }
-
-        response_data = asyncio.run(post_novelai("https://image.novelai.net/ai/generate-image", payload, header, proxy))
-
-        with zipfile.ZipFile(BytesIO(response_data)) as z:
-            z.extractall(save_path)
-
-        image_bytes = []
-
-        def images_to_base64(save_path):
-
-            for filename in os.listdir(save_path):
-                if filename.endswith('.png'):
-                    file_path = os.path.join(save_path, filename)
-                    with open(file_path, "rb") as image_file:
-                        image_data = image_file.read()
-                        image_bytes.append(image_data)
-
-        images_to_base64(save_path)
-
-        def pil_and_tensor(img_data: bytes):
-            img = Image.open(BytesIO(img_data))
-            tensor_img = pil_to_tensor(img)
-
-            return tensor_img
-
-        tensor_images = [pil_and_tensor(img_data) for img_data in image_bytes]
-
-        tensor = torch.cat(tensor_images, dim=0)
-
-        return (tensor,)
-
-
 class CharacterPromptSelect:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "character1": ("STRING", {"default": "firefly_(honkai:_star_rail)"}),
+                "character1": ("STRING", {"default": "Input Character 1"}),
                 "character1_uc": ("STRING", {"default": "negative_prompt"}),
-                "character1_x": ("FLOAT", {"default": 0.5}),
-                "character1_y": ("FLOAT", {"default": 0.5}),
+                "character1_x": ("INT", {"default": 3, "min": 0, "max": 10}),
+                "character1_y": ("INT", {"default": 3, "min": 0, "max": 10}),
             },
             "optional": {
                 "character2_enable": ("BOOLEAN", {"default": True}),
-                "character2": ("STRING", {"default": "kafka__(honkai:_star_rail)"}),
+                "character2": ("STRING", {"default": "Input Character 2"}),
                 "character2_uc": ("STRING", {"default": "negative_prompt"}),
-                "character2_x": ("FLOAT", {"default": 0.1}),
-                "character2_y": ("FLOAT", {"default": 0.5}),
+                "character2_x": ("INT", {"default": 1, "min": 0, "max": 10}),
+                "character2_y": ("INT", {"default": 3, "min": 0, "max": 10}),
                 "character3_enable": ("BOOLEAN", {"default": False}),
                 "character3": ("STRING", {"default": ""}),
                 "character3_uc": ("STRING", {"default": "negative_prompt"}),
-                "character3_x": ("FLOAT", {"default": 0.1}),
-                "character3_y": ("FLOAT", {"default": 0.5}),
+                "character3_x": ("INT", {"default": 1, "min": 0, "max": 10}),
+                "character3_y": ("INT", {"default": 3, "min": 0, "max": 10}),
                 "character4_enable": ("BOOLEAN", {"default": False}),
                 "character4": ("STRING", {"default": ""}),
                 "character4_uc": ("STRING", {"default": "negative_prompt"}),
-                "character4_x": ("FLOAT", {"default": 0.1}),
-                "character4_y": ("FLOAT", {"default": 0.5}),
+                "character4_x": ("INT", {"default": 1, "min": 0, "max": 10}),
+                "character4_y": ("INT", {"default": 3, "min": 0, "max": 10}),
                 "character5_enable": ("BOOLEAN", {"default": False}),
                 "character5": ("STRING", {"default": ""}),
                 "character5_uc": ("STRING", {"default": "negative_prompt"}),
-                "character5_x": ("FLOAT", {"default": 0.1}),
-                "character5_y": ("FLOAT", {"default": 0.5}),
+                "character5_x": ("INT", {"default": 1, "min": 0, "max": 10}),
+                "character5_y": ("INT", {"default": 3, "min": 0, "max": 10}),
             },
         }
 
@@ -272,7 +213,7 @@ class CharacterPromptSelect:
     RETURN_NAMES = ("CharacterPrompt",)
     FUNCTION = "build_character_prompt"
     OUTPUT_NODE = False
-    CATEGORY = "NovelAI/Character"  # 카테고리 변경 및 세분화
+    CATEGORY = "NovelAI/Character"
 
     def build_character_prompt(
         self, character1, character1_uc, character1_x, character1_y,
@@ -280,12 +221,13 @@ class CharacterPromptSelect:
         character3_enable, character3, character3_uc, character3_x, character3_y, 
         character4_enable, character4, character4_uc, character4_x, character4_y, 
         character5_enable, character5, character5_uc, character5_x, character5_y
-   ):
-        character1_pos = {"x": character1_x, "y": character1_y}
-        character2_pos = {"x": character2_x, "y": character2_y}
-        character3_pos = {"x": character3_x, "y": character3_y}
-        character4_pos = {"x": character4_x, "y": character4_y}
-        character5_pos = {"x": character5_x, "y": character5_y}
+    ):
+        # Convert integer coordinates to float (0-10 -> 0.0-1.0)
+        character1_pos = {"x": int(character1_x * 0.099 * 10) / 10, "y": int(character1_y * 0.099 * 10) / 10}
+        character2_pos = {"x": int(character2_x * 0.099 * 10) / 10, "y": int(character2_y * 0.099 * 10) / 10}
+        character3_pos = {"x": int(character3_x * 0.099 * 10) / 10, "y": int(character3_y * 0.099 * 10) / 10}
+        character4_pos = {"x": int(character4_x * 0.099 * 10) / 10, "y": int(character4_y * 0.099 * 10) / 10}
+        character5_pos = {"x": int(character5_x * 0.099 * 10) / 10, "y": int(character5_y * 0.099 * 10) / 10}
 
         character_prompts = []
 
@@ -303,7 +245,12 @@ class CharacterPromptSelect:
         return (character_prompts,)
 
 
-class NovelAIRequestPayload:
+class NovelAIGenerator:
+    """
+    Combined NovelAIRequestPayload and NovelAIRequest node
+    that handles both payload creation and image generation.
+    Uses environment variable for the API token.
+    """
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -313,7 +260,7 @@ class NovelAIRequestPayload:
         ]
         scheduler_list = ["karras"]
 
-        # 표시할 모델 이름 리스트 (이 이름이 UI에 표시됨)
+        # Display model names list
         model_display_list = [
             "NAI Diffusion V4.5 Curated",
             "NAI Diffusion V4 Full",
@@ -322,19 +269,6 @@ class NovelAIRequestPayload:
             "NAI Diffusion Furry V3",
             "NAI Diffusion V2"
         ]
-
-        # 각 표시 이름에 대응하는 실제 API 모델 ID
-        model_ids = [
-            "nai-diffusion-4-5-curated",
-            "nai-diffusion-4-full",
-            "nai-diffusion-4-curated-preview",
-            "nai-diffusion-3",
-            "nai-diffusion-furry-3",
-            "nai-diffusion-2",
-        ]
-
-        # 표시 이름과 API ID를 딕셔너리로 매핑
-        model_name_to_id = dict(zip(model_display_list, model_ids))
 
         return {
             "required": {
@@ -346,46 +280,47 @@ class NovelAIRequestPayload:
                 "sampler": (sampler_list,),
                 "n_iter": ("INT", {"default": 1}),
                 "steps": ("INT", {"default": 28}),
-                "cfg_scale": ("FLOAT", {"default": 6}),
+                "cfg_scale": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 30.0, "step": 0.5, "display": "%.1f"}),
                 "width": ("INT", {"default": 832}),
                 "height": ("INT", {"default": 1216}),
                 "scheduler": (scheduler_list,),
                 "ucPreset": (ucPreset_list,),
-                "cfg_rescale": ("INT", {"default": 0}),
+                "cfg_rescale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "display": "%.2f"}),
                 "characterPrompts": ("LIST",),
                 "prefer_brownian": ("BOOLEAN", {"default": False}),
                 "use_coords": ("BOOLEAN", {"default": True}),
                 "use_order": ("BOOLEAN", {"default": True}),
-                "model": (model_display_list, {"default": model_display_list[0]})  # 표시 이름 사용
+                "model": (model_display_list, {"default": model_display_list[0]})
             }
         }
 
-    RETURN_TYPES = ("NovelAITXT2IMGPayload", "DICT")
-    RETURN_NAMES = ("payload", "payload_dict")
-    FUNCTION = "build_payload"
-    CATEGORY = "NovelAI/Payload"  # 카테고리 변경 및 세분화
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate_image"
+    OUTPUT_NODE = True
+    CATEGORY = "NovelAI"
 
-    def build_payload(
+    def generate_image(
             self,
             prompt,
-            negative_prompt,
-            seed,
-            sampler,
-            n_iter,
-            steps,
-            cfg_scale,
-            width,
-            height,
-            scheduler,
-            ucPreset,
-            cfg_rescale,
-            prefer_brownian,
-            model,  # 이제 이 값은 표시 이름
+            negative_prompt="",
+            seed=-1,
+            sampler="k_euler",
+            n_iter=1,
+            steps=28,
+            cfg_scale=6.0,
+            width=832,
+            height=1216,
+            scheduler="karras",
+            ucPreset=ucPreset_list[0],
+            cfg_rescale=0,
+            characterPrompts=[],
+            prefer_brownian=False,
             use_coords=True,
             use_order=True,
-            characterPrompts=[],
+            model="NAI Diffusion V4.5 Curated"
     ):
-        # 표시 이름에서 API 모델 ID로 변환
+        # Convert model display name to API model ID
         model_ids = {
             "NAI Diffusion V4.5 Curated": "nai-diffusion-4-5-curated",
             "NAI Diffusion V4 Full": "nai-diffusion-4-full",
@@ -394,10 +329,11 @@ class NovelAIRequestPayload:
             "NAI Diffusion Furry V3": "nai-diffusion-furry-3",
             "NAI Diffusion V2": "nai-diffusion-2"
         }
-        model_id = model_ids.get(model, "nai-diffusion-4-5-curated")  # 기본값 설정
+        model_id = model_ids.get(model, "nai-diffusion-4-5-curated")
 
+        # Create base request
         negative_prompt = negative_prompt + "," + ucPreset
-        instance_ = BaseRequest(
+        base_request = BaseRequest(
             prompt=prompt,
             negative_prompt=negative_prompt,
             seed=seed,
@@ -410,36 +346,86 @@ class NovelAIRequestPayload:
             scheduler=scheduler,
         )
 
-        ucPreset = ucPreset_list.index(ucPreset)
+        # Get ucPreset index
+        ucPreset_index = ucPreset_list.index(ucPreset)
 
-        instance_ = NovelAITXT2IMGPayload(
-            ucPreset,
+        # Create payload
+        payload = NovelAITXT2IMGPayload(
+            ucPreset_index,
             cfg_rescale,
             characterPrompts,
             prefer_brownian,
-            instance_,
-            model_id,  # API 모델 ID 사용
+            base_request,
+            model_id,
             use_coords,
             use_order
         )
 
-        return instance_, dict(vars(instance_))
+        # Prepare for API request
+        save_path = "./temp/api_request"
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
+        # Get token from environment variable
+        token = os.getenv("NAI_ACCESS_TOKEN", "")
+        if not token:
+            print("WARNING: NAI_ACCESS_TOKEN environment variable is not set or empty.")
+            print("Please set your NovelAI token in your .env file with the key NAI_ACCESS_TOKEN")
+            raise ValueError("NovelAI token not found. Set NAI_ACCESS_TOKEN in your .env file.")
+            
+        header = {
+            "authorization": "Bearer " + token,
+            ":authority": "https://api.novelai.net",
+            ":path": "/ai/generate-image",
+            "content-type": "application/json",
+            "referer": "https://novelai.net",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
+        }
+
+        api_payload = {
+            "input": payload.prompt,
+            "model": payload.model,
+            "parameters": dict(vars(payload))
+        }
+
+        # Make the API request
+        response_data = asyncio.run(post_novelai("https://image.novelai.net/ai/generate-image", api_payload, header))
+
+        # Process the response
+        with zipfile.ZipFile(BytesIO(response_data)) as z:
+            z.extractall(save_path)
+
+        image_bytes = []
+        for filename in os.listdir(save_path):
+            if filename.endswith('.png'):
+                file_path = os.path.join(save_path, filename)
+                with open(file_path, "rb") as image_file:
+                    image_data = image_file.read()
+                    image_bytes.append(image_data)
+
+        # Convert images to tensors
+        tensor_images = []
+        for img_data in image_bytes:
+            img = Image.open(BytesIO(img_data))
+            tensor_img = pil_to_tensor(img)
+            tensor_images.append(tensor_img)
+
+        tensor = torch.cat(tensor_images, dim=0)
+        return (tensor,)
 
 
 NODE_CLASS_MAPPINGS = {
-    "NovelAI_Request": NovelAIRequest,
     "Character_Prompt_Select": CharacterPromptSelect,
-    "NovelAI_Request_Payload": NovelAIRequestPayload
+    "NovelAI_Generator": NovelAIGenerator
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NovelAI_Request": "NovelAIRequest",
     "Character_Prompt_Select": "CharacterPromptSelect",
-    "NovelAI_Request_Payload": "NovelAIRequestPayload"
+    "NovelAI_Generator": "NovelAIGenerator"
 }
 
-# 모델 ID와 표시 이름 매핑을 클래스 외부에서도 사용할 수 있도록 정의
+# Model ID and display name mapping for external use
 MODEL_DISPLAY_NAMES = {
     "nai-diffusion-4-5-curated": "NAI Diffusion V4.5 Curated",
     "nai-diffusion-4-full": "NAI Diffusion V4 Full",
